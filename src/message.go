@@ -13,3 +13,7 @@ type Message struct {
 func (m Message) Print() {
     fmt.Printf("%s: %s\n", m.Sender, m.Text)
 }
+
+func NewMessage(sender, text string) *Message{
+    return &Message{Sender: sender, Text: text}
+}

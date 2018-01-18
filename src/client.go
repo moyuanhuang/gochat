@@ -6,6 +6,7 @@ import (
     "os"
     "bufio"
     "encoding/gob"
+    "strings"
 )
 
 const PROTOCOL = "tcp4"
@@ -27,7 +28,8 @@ func NewClient(serviceAddr string) (*Client, error) {
 }
 
 func sendMessage(c *Client) {
-    scanner := bufio.NewScanner(os.Stdin, bufio.MaxScanTokenSize * 10)
+    scanner := bufio.NewScanner(os.Stdin)
+    scanner.Buffer([]byte{}, bufio.MaxScanTokenSize * 10)
     // enlarge the scanner's buffer size, or may not able to read a complete line, otherwise use bufio.Reader.ReadString('\n')
     // detailed explanation here: https://github.com/ma6174/blog/issues/10
     encoder := gob.NewEncoder(c.Conn)
@@ -38,14 +40,19 @@ func sendMessage(c *Client) {
         // DONNOT use scanln, because it treats space as delimiter:
         // https://stackoverflow.com/questions/43843477/scanln-in-golang-doesnt-accept-whitespace
         // fmt.Scanln(&message)
-        message := Message{Sender: c.UserName, Text: scanner.Text()}
-        if message.Text == "/quit" {
+        rawMsg := scanner.Text()
+
+        if isQuit(rawMsg) {
+            message := Message{Sender: c.UserName, Text: rawMsg}
+            err := encoder.Encode(message)
+            HandleError(err)
             fmt.Println("Exiting chat room... Bye.")
             os.Exit(0)
+        } else {
+            message := generateMessage(rawMsg, c)
+            err := encoder.Encode(message)
+            HandleError(err)
         }
-
-        err := encoder.Encode(message)
-        HandleError(err)
     }
 }
 
@@ -78,4 +85,24 @@ func renameClient(c *Client, enc *gob.Encoder){
     message := Message{Text: text}
     err := enc.Encode(message)
     HandleError(err)
+}
+
+func isQuit(rawMsg string) bool {
+    quit := "/quit"
+    return strings.HasPrefix(rawMsg, quit)
+}
+
+func generateMessage(rawMsg string, c *Client) *Message {
+    message := &Message{Sender: c.UserName, Text: rawMsg}
+
+    // handling different commands
+    cmds := strings.Fields(rawMsg)
+    switch cmds[0] {
+    case "/dm":  // direct message
+        message.Receivers = []string{cmds[1]}
+        message.Text = strings.TrimPrefix(rawMsg[len(cmds[0] + cmds[1]):], " ")
+    // TODO: /group (group chat)
+    }
+
+    return message
 }

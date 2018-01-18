@@ -8,6 +8,8 @@ import (
     "encoding/gob"
 )
 
+const SERVER = "Server"
+
 type Server struct {
     Listener net.Listener
     Broadcasters map[string]*gob.Encoder
@@ -32,17 +34,26 @@ func NewServer(serviceAddr string) (*Server, error) {
 func handleBroadcast(s *Server) {
     for {
         message := <-s.MessageCh
-        fmt.Printf("Broadcasting message from %s...\n", message.Sender)
-        if len(message.Receivers) == 0 {
+        message.Print()
+        if len(message.Receivers) == 0 {  // To All
             for key, b := range s.Broadcasters {
                 if key != message.Sender {
                     err := b.Encode(message)
                     HandleError(err)
                 }
             }
+        } else {  // direct message
+            for _, r := range message.Receivers {
+                if b, ok := s.Broadcasters[r]; ok {
+                    err := b.Encode(message)
+                    HandleError(err)
+                } else {
+                    reply := NewMessage(SERVER, r + " doesn't exist!")
+                    err := s.Broadcasters[message.Sender].Encode(reply)
+                    HandleError(err)
+                }
+            }
         }
-        // else if { @userName }
-        // be aware of non-existing userName
     }
 }
 
@@ -51,13 +62,20 @@ func (s *Server) ListenClient(conn net.Conn){
     for {
         var message Message
         err := decoder.Decode(&message)
-        HandleError(err)
-        if message.Sender == "" {
+        if err != nil {
+            s.disconectClient(conn.RemoteAddr().String())
+            fmt.Printf("Lost connection with %s\n", conn.RemoteAddr().String())
+            return
+        }
+        if isCommand(message) {
             cmds := strings.Fields(message.Text)
             switch cmds[0] {
             case "/name":
                 s.Broadcasters[cmds[1]] = gob.NewEncoder(conn)
                 fmt.Printf("%s named himself %s\n", conn.RemoteAddr().String(), cmds[1])
+            case "/quit":
+                s.disconectClient(message.Sender)
+                return
             default:
                 fmt.Println("Unrecognized command: ", message.Text)
             }
@@ -76,4 +94,10 @@ func (s *Server) StartServer() {
         go s.ListenClient(conn)
     }
     os.Exit(0)
+}
+
+func (s *Server) disconectClient(clientName string) {
+    quitMessage := NewMessage(SERVER, clientName + " quited the chatroom!")
+    s.MessageCh <- *quitMessage
+    delete(s.Broadcasters, clientName)
 }
